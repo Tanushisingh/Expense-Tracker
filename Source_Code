@@ -1,0 +1,274 @@
+"""
+Expense Tracker with Data Analysis
+Python Project for Cognizant Application
+"""
+
+import csv
+import os
+from datetime import datetime
+from collections import defaultdict
+
+# ─── Try importing optional libraries ────────────────────────────────────────
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("[Note] matplotlib not installed. Charts will be skipped.")
+    print("       Install with: pip install matplotlib\n")
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+FILE_NAME = "expenses.csv"
+CATEGORIES = ["Food", "Transport", "Shopping", "Utilities", "Health",
+              "Education", "Entertainment", "Other"]
+
+
+# ─── Expense Class ────────────────────────────────────────────────────────────
+class Expense:
+    def __init__(self, expense_id, date, category, description, amount):
+        self.expense_id = expense_id
+        self.date = date                   # datetime object
+        self.category = category
+        self.description = description
+        self.amount = float(amount)
+
+    def to_dict(self):
+        return {
+            "id": self.expense_id,
+            "date": self.date.strftime("%Y-%m-%d"),
+            "category": self.category,
+            "description": self.description,
+            "amount": f"{self.amount:.2f}"
+        }
+
+    def __str__(self):
+        return (f"[{self.expense_id:>4}] {self.date.strftime('%d %b %Y')} | "
+                f"{self.category:<15} | ₹{self.amount:>8.2f} | {self.description}")
+
+
+# ─── ExpenseTracker Class ─────────────────────────────────────────────────────
+class ExpenseTracker:
+    def __init__(self):
+        self.expenses = []
+        self.next_id = 1
+        self.load_from_file()
+
+    # ── CRUD ──────────────────────────────────────────────────────────────────
+    def add_expense(self):
+        print("\n--- Add Expense ---")
+        date_str = input("Date (DD-MM-YYYY) or press Enter for today: ").strip()
+        if not date_str:
+            date = datetime.today()
+        else:
+            try:
+                date = datetime.strptime(date_str, "%d-%m-%Y")
+            except ValueError:
+                print("Invalid date format.")
+                return
+
+        print("Categories:", ", ".join(f"{i+1}.{c}" for i, c in enumerate(CATEGORIES)))
+        cat_choice = input("Choose category (1-8): ").strip()
+        try:
+            category = CATEGORIES[int(cat_choice) - 1]
+        except (ValueError, IndexError):
+            print("Invalid category.")
+            return
+
+        description = input("Description: ").strip()
+        if not description:
+            print("Description cannot be empty.")
+            return
+
+        amount_str = input("Amount (₹): ").strip()
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            print("Invalid amount.")
+            return
+
+        expense = Expense(self.next_id, date, category, description, amount)
+        self.expenses.append(expense)
+        self.next_id += 1
+        self.save_to_file()
+        print(f"Expense added! ID: {expense.expense_id}")
+
+    def view_all(self):
+        if not self.expenses:
+            print("No expenses recorded.")
+            return
+        print(f"\n{'─'*70}")
+        print(f"{'ID':>4}  {'Date':<13} {'Category':<15} {'Amount':>10}  Description")
+        print(f"{'─'*70}")
+        for e in sorted(self.expenses, key=lambda x: x.date, reverse=True):
+            print(e)
+        print(f"{'─'*70}")
+        total = sum(e.amount for e in self.expenses)
+        print(f"{'Total':>44} ₹{total:>8.2f}")
+
+    def delete_expense(self):
+        self.view_all()
+        if not self.expenses:
+            return
+        try:
+            eid = int(input("\nEnter ID to delete: ").strip())
+            original = len(self.expenses)
+            self.expenses = [e for e in self.expenses if e.expense_id != eid]
+            if len(self.expenses) < original:
+                self.save_to_file()
+                print("Expense deleted.")
+            else:
+                print("ID not found.")
+        except ValueError:
+            print("Invalid ID.")
+
+    # ── Analysis ──────────────────────────────────────────────────────────────
+    def monthly_summary(self):
+        if not self.expenses:
+            print("No data.")
+            return
+
+        print("\nAvailable months:")
+        months = sorted(set(e.date.strftime("%Y-%m") for e in self.expenses), reverse=True)
+        for i, m in enumerate(months):
+            print(f"  {i+1}. {datetime.strptime(m, '%Y-%m').strftime('%B %Y')}")
+
+        try:
+            choice = int(input("Select month (number): ").strip()) - 1
+            selected = months[choice]
+        except (ValueError, IndexError):
+            print("Invalid choice.")
+            return
+
+        filtered = [e for e in self.expenses if e.date.strftime("%Y-%m") == selected]
+        cat_totals = defaultdict(float)
+        for e in filtered:
+            cat_totals[e.category] += e.amount
+
+        month_label = datetime.strptime(selected, "%Y-%m").strftime("%B %Y")
+        print(f"\n─── Summary for {month_label} ───")
+        print(f"{'Category':<18} {'Amount':>10}")
+        print("─" * 32)
+        for cat, total in sorted(cat_totals.items(), key=lambda x: -x[1]):
+            print(f"{cat:<18} ₹{total:>8.2f}")
+        print("─" * 32)
+        grand_total = sum(cat_totals.values())
+        print(f"{'TOTAL':<18} ₹{grand_total:>8.2f}")
+        print(f"Transactions: {len(filtered)}")
+
+        if MATPLOTLIB_AVAILABLE and cat_totals:
+            self._plot_charts(cat_totals, month_label)
+
+    def _plot_charts(self, cat_totals, title):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+        fig.suptitle(f"Spending Analysis — {title}", fontsize=14, fontweight='bold')
+
+        categories = list(cat_totals.keys())
+        amounts = list(cat_totals.values())
+        colors = plt.cm.Set3.colors[:len(categories)]
+
+        # Bar chart
+        bars = ax1.bar(categories, amounts, color=colors, edgecolor='white', linewidth=0.8)
+        ax1.set_title("Spending by Category")
+        ax1.set_ylabel("Amount (₹)")
+        ax1.set_xlabel("Category")
+        ax1.tick_params(axis='x', rotation=30)
+        for bar, amt in zip(bars, amounts):
+            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                     f"₹{amt:.0f}", ha='center', va='bottom', fontsize=9)
+
+        # Pie chart
+        wedges, texts, autotexts = ax2.pie(
+            amounts, labels=categories, autopct='%1.1f%%',
+            colors=colors, startangle=140,
+            wedgeprops=dict(edgecolor='white', linewidth=0.8)
+        )
+        ax2.set_title("Expense Distribution")
+
+        plt.tight_layout()
+        filename = f"chart_{title.replace(' ', '_')}.png"
+        plt.savefig(filename, dpi=120, bbox_inches='tight')
+        print(f"\nChart saved as '{filename}'")
+        plt.show()
+
+    def search_by_category(self):
+        print("Categories:", ", ".join(f"{i+1}.{c}" for i, c in enumerate(CATEGORIES)))
+        try:
+            choice = int(input("Choose category: ").strip()) - 1
+            category = CATEGORIES[choice]
+        except (ValueError, IndexError):
+            print("Invalid.")
+            return
+
+        results = [e for e in self.expenses if e.category == category]
+        if not results:
+            print(f"No expenses in '{category}'.")
+            return
+        print(f"\n--- {category} Expenses ---")
+        for e in results:
+            print(e)
+        print(f"Total: ₹{sum(e.amount for e in results):.2f}")
+
+    # ── File I/O ──────────────────────────────────────────────────────────────
+    def save_to_file(self):
+        with open(FILE_NAME, "w", newline="") as f:
+            fieldnames = ["id", "date", "category", "description", "amount"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for e in self.expenses:
+                writer.writerow(e.to_dict())
+
+    def load_from_file(self):
+        if not os.path.exists(FILE_NAME):
+            return
+        with open(FILE_NAME, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    date = datetime.strptime(row["date"], "%Y-%m-%d")
+                    exp = Expense(int(row["id"]), date, row["category"],
+                                  row["description"], row["amount"])
+                    self.expenses.append(exp)
+                    self.next_id = max(self.next_id, int(row["id"]) + 1)
+                except (ValueError, KeyError):
+                    continue
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+def main():
+    tracker = ExpenseTracker()
+    print("\n╔══════════════════════════════════╗")
+    print("║   Expense Tracker — Python App   ║")
+    print("╚══════════════════════════════════╝")
+
+    while True:
+        print("\n--- MENU ---")
+        print("1. Add Expense")
+        print("2. View All Expenses")
+        print("3. Monthly Summary + Chart")
+        print("4. Search by Category")
+        print("5. Delete Expense")
+        print("6. Exit")
+        choice = input("Choose option: ").strip()
+
+        if choice == "1":
+            tracker.add_expense()
+        elif choice == "2":
+            tracker.view_all()
+        elif choice == "3":
+            tracker.monthly_summary()
+        elif choice == "4":
+            tracker.search_by_category()
+        elif choice == "5":
+            tracker.delete_expense()
+        elif choice == "6":
+            print("Goodbye!")
+            break
+        else:
+            print("Invalid option.")
+
+
+if __name__ == "__main__":
+    main()
